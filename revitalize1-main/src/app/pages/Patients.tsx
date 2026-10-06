@@ -1,24 +1,34 @@
-import { Search, Filter, UserPlus, Calendar, MapPin, Phone } from "lucide-react";
+import { Search, Filter, UserPlus, Calendar, Phone } from "lucide-react";
 import { Link } from "react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getPatients, type Patient } from "../api";
 
 export default function Patients() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const patients = [
-    { id: 1, name: "Maria Silva Santos", cpf: "123.456.789-00", birthDate: "15/03/1985", phone: "(62) 98765-4321", status: "Ativo", lastVisit: "22/04/2026", diagnosis: "F32 - Episódio Depressivo" },
-    { id: 2, name: "João Pedro Oliveira", cpf: "234.567.890-11", birthDate: "22/07/1978", phone: "(62) 98876-5432", status: "Ativo", lastVisit: "21/04/2026", diagnosis: "F20 - Esquizofrenia" },
-    { id: 3, name: "Ana Paula Costa", cpf: "345.678.901-22", birthDate: "08/11/1992", phone: "(62) 98987-6543", status: "Ativo", lastVisit: "20/04/2026", diagnosis: "F41 - Outros Transtornos Ansiosos" },
-    { id: 4, name: "Carlos Eduardo Lima", cpf: "456.789.012-33", birthDate: "30/05/1980", phone: "(62) 98098-7654", status: "Em Crise", lastVisit: "23/04/2026", diagnosis: "F31 - Transtorno Afetivo Bipolar" },
-    { id: 5, name: "Juliana Ferreira Souza", cpf: "567.890.123-44", birthDate: "12/09/1995", phone: "(62) 98109-8765", status: "Ativo", lastVisit: "19/04/2026", diagnosis: "F10 - Transtornos Uso de Álcool" },
-    { id: 6, name: "Roberto Santos Alves", cpf: "678.901.234-55", birthDate: "25/01/1988", phone: "(62) 98210-9876", status: "Inativo", lastVisit: "10/03/2026", diagnosis: "F33 - Transtorno Depressivo Recorrente" },
-  ];
+  useEffect(() => {
+    let active = true;
+    getPatients()
+      .then((data) => {
+        if (active) setPatients(data);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : "Não foi possível carregar os pacientes.");
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   const normalizeCPF = (value: string) => value.replace(/\D/g, "");
 
   const filteredPatients = patients.filter(patient => {
-    const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = patient.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          normalizeCPF(patient.cpf).includes(normalizeCPF(searchTerm));
     const matchesFilter = filterStatus === "all" || patient.status === filterStatus;
     return matchesSearch && matchesFilter;
@@ -75,6 +85,18 @@ export default function Patients() {
         </div>
       </div>
 
+      {isLoading && (
+        <div className="bg-card rounded-xl border border-border p-12 text-center text-muted-foreground">
+          Carregando pacientes...
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-100 px-4 py-3 rounded-lg text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4">
         {filteredPatients.map((patient) => (
           <Link
@@ -85,10 +107,10 @@ export default function Patients() {
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
               <div className="flex items-start gap-4">
                 <div className="w-14 h-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-medium text-lg">
-                  {patient.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  {patient.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-foreground text-lg">{patient.name}</h3>
+                  <h3 className="font-semibold text-foreground text-lg">{patient.fullName}</h3>
                   <p className="text-sm text-muted-foreground">CPF: {patient.cpf}</p>
                   <div className="flex flex-wrap gap-4 mt-2 text-sm text-muted-foreground">
                     <span className="flex items-center gap-1">
@@ -97,7 +119,7 @@ export default function Patients() {
                     </span>
                     <span className="flex items-center gap-1">
                       <Phone className="w-4 h-4" />
-                      {patient.phone}
+                      {patient.phone || "Telefone não informado"}
                     </span>
                   </div>
                 </div>
@@ -106,11 +128,11 @@ export default function Patients() {
               <div className="flex flex-wrap items-center gap-4">
                 <div className="text-sm">
                   <p className="text-muted-foreground">Último Atendimento</p>
-                  <p className="font-medium text-foreground">{patient.lastVisit}</p>
+                  <p className="font-medium text-foreground">{patient.admissionDate || "Não informado"}</p>
                 </div>
                 <div className="text-sm">
                   <p className="text-muted-foreground">Diagnóstico</p>
-                  <p className="font-medium text-foreground">{patient.diagnosis}</p>
+                  <p className="font-medium text-foreground">{patient.diagnosis || "Não informado"}</p>
                 </div>
                 <span className={`px-4 py-2 rounded-full text-sm font-medium ${
                   patient.status === "Ativo" ? "bg-green-100 text-green-700" :

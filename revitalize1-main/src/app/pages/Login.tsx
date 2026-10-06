@@ -3,6 +3,7 @@ import { Lock, User, Moon, Sun, X, Mail } from "lucide-react";
 import logoLight from "../../imports/Logos_Revitalize.png";
 import logoDark from "../../imports/Logos_Revitalize_(1).png";
 import { useState, useEffect } from "react";
+import { login as loginRequest } from "../api";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -10,6 +11,10 @@ export default function Login() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const logo = isDark ? logoDark : logoLight;
 
   useEffect(() => {
@@ -38,9 +43,20 @@ export default function Login() {
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate("/dashboard");
+    setLoginError("");
+    setIsLoggingIn(true);
+
+    try {
+      const { token } = await loginRequest(email.trim(), password);
+      localStorage.setItem("revitalize-token", token);
+      navigate("/dashboard", { replace: true });
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Não foi possível efetuar o login.");
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   return (
@@ -82,6 +98,9 @@ export default function Login() {
                   <input
                     id="email"
                     type="text"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
                     placeholder="Digite seu e-mail ou CPF"
                     className="w-full pl-10 pr-4 py-3 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
@@ -97,6 +116,9 @@ export default function Login() {
                   <input
                     id="password"
                     type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
                     placeholder="Digite sua senha"
                     className="w-full pl-10 pr-4 py-3 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
@@ -118,11 +140,18 @@ export default function Login() {
               </button>
             </div>
 
+            {loginError && (
+              <p className="rounded-lg bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                {loginError}
+              </p>
+            )}
+
             <button
               type="submit"
-              className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all shadow-lg hover:shadow-xl"
+              disabled={isLoggingIn}
+              className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all shadow-lg hover:shadow-xl disabled:opacity-60"
             >
-              Entrar no Sistema
+              {isLoggingIn ? "Entrando..." : "Entrar no Sistema"}
             </button>
           </form>
 
