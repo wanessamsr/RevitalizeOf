@@ -75,8 +75,7 @@ export default function Dashboard() {
   };
 
   const handleStartAppointment = (schedule: typeof scheduleItems[0]) => {
-    localStorage.setItem('currentAppointment', JSON.stringify(schedule));
-    navigate('/appointment-session');
+    navigate('/appointment-session', { state: { appointment: schedule } });
   };
 
   const [showStatsModal, setShowStatsModal] = useState(false);

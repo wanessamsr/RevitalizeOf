@@ -100,15 +100,18 @@ export default function Schedule() {
   };
 
   const handleStartAppointment = (appointment: typeof appointments[0]) => {
-    localStorage.setItem('currentAppointment', JSON.stringify({
-      id: appointment.id,
-      time: `${appointment.startHour.toString().padStart(2, '0')}:00`,
-      activity: appointment.title,
-      participants: appointment.participants,
-      description: appointment.description,
-      isUrgent: appointment.isUrgent
-    }));
-    navigate('/appointment-session');
+    navigate('/appointment-session', {
+      state: {
+        appointment: {
+          id: appointment.id,
+          time: `${appointment.startHour.toString().padStart(2, '0')}:00`,
+          activity: appointment.title,
+          participants: appointment.participants,
+          description: appointment.description,
+          isUrgent: appointment.isUrgent
+        }
+      }
+    });
   };
 
   const openAddModal = (timeSlot?: number) => {

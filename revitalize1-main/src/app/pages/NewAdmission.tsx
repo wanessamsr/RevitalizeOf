@@ -1,11 +1,108 @@
 import { useState } from "react";
 import { ArrowLeft, Save, User, FileText, Heart, AlertTriangle, Users, Home, Briefcase, Activity } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { ApiError, createAdmission, type AdmissionDetail, type NewAdmissionInput } from "../api";
+import { useAuth } from "../contexts/AuthContext";
+import { ROLE_LABELS } from "../roles";
+
+type AdmissionType = NewAdmissionInput["type"];
+
+function formatCpfInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, "$1.$2")
+    .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d{1,2})$/, ".$1-$2");
+}
+
+// Junta as demais respostas da ficha (campos sem estado próprio) em pares
+// seção / pergunta / resposta, para que nada do que foi preenchido se perca.
+function collectAdmissionDetails(form: HTMLFormElement): AdmissionDetail[] {
+  const grouped = new Map<string, AdmissionDetail>();
+  const elements = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
+
+  elements.forEach((element) => {
+    if (element.dataset.core === "true" || element.disabled) return;
+    const section =
+      element.closest('[class*="bg-muted/50"]')?.querySelector("h3")?.textContent?.replace(/\s+/g, " ").trim() ?? "Ficha";
+
+    let label = "";
+    let value = "";
+
+    if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+      if (!element.checked) return;
+      const optionLabel = element.closest("label");
+      const groupTitle = optionLabel?.parentElement?.previousElementSibling;
+      label = groupTitle?.tagName === "LABEL" ? (groupTitle.textContent ?? "").trim() : element.name || "Opções";
+      value =
+        element.type === "radio" && element.value && element.value !== "on"
+          ? element.value
+          : (optionLabel?.textContent ?? "Sim").replace(/\s+/g, " ").trim();
+    } else {
+      value = element.value.trim();
+      if (!value || (element instanceof HTMLSelectElement && value === "Selecione...")) return;
+      let node: HTMLElement | null = element.parentElement;
+      while (node && node !== form && !label) {
+        const own = node.querySelector(":scope > label");
+        if (own) label = (own.textContent ?? "").trim();
+        node = node.parentElement;
+      }
+      if (!label) label = element.getAttribute("placeholder") ?? "Campo";
+    }
+
+    const key = `${section}|${label}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.value = `${existing.value}, ${value}`.slice(0, 5000);
+    } else {
+      grouped.set(key, { section: section.slice(0, 150), label: label.replace(/\s*\*$/, "").slice(0, 200), value: value.slice(0, 5000) });
+    }
+  });
+
+  return Array.from(grouped.values()).slice(0, 400);
+}
 
 export default function NewAdmission() {
-  const [admissionType, setAdmissionType] = useState("geral");
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [admissionType, setAdmissionType] = useState<AdmissionType>("geral");
   const [hasSpouse, setHasSpouse] = useState(false);
   const [childrenCount, setChildrenCount] = useState(0);
+  const [fullName, setFullName] = useState("");
+  const [socialName, setSocialName] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [reason, setReason] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaveError("");
+    setSaving(true);
+    try {
+      const { patientId } = await createAdmission({
+        type: admissionType,
+        patient: {
+          fullName: fullName.trim(),
+          socialName: socialName.trim() || undefined,
+          cpf,
+          birthDate,
+        },
+        reason: reason.trim(),
+        details: collectAdmissionDetails(event.currentTarget),
+      });
+      navigate(`/patients/${patientId}`, { replace: true });
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.fields) {
+        setSaveError(Object.values(requestError.fields)[0] ?? requestError.message);
+      } else {
+        setSaveError(requestError instanceof Error ? requestError.message : "Não foi possível salvar o acolhimento.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const sinaisESintomas = [
     "Agitação Psicomotora", "Agressividade", "Alucinação Auditiva", "Alucinação Visual",
@@ -53,7 +150,7 @@ export default function NewAdmission() {
                 <button
                   key={type.value}
                   type="button"
-                  onClick={() => setAdmissionType(type.value)}
+                  onClick={() => setAdmissionType(type.value as AdmissionType)}
                   className={`p-4 rounded-lg border-2 transition-all ${
                     admissionType === type.value
                       ? "border-primary bg-primary/5"
@@ -70,7 +167,7 @@ export default function NewAdmission() {
           </div>
         </div>
 
-        <form className="space-y-6">
+        <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="bg-muted/50 p-6 rounded-lg space-y-4">
             <h3 className="font-semibold text-foreground flex items-center gap-2 text-lg">
               <User className="w-5 h-5" />
@@ -105,6 +202,12 @@ export default function NewAdmission() {
                 <label className="block text-sm font-medium text-foreground mb-2">Nome Completo *</label>
                 <input
                   type="text"
+                  data-core="true"
+                  required
+                  minLength={3}
+                  maxLength={150}
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
                   className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="Digite o nome completo"
                 />
@@ -113,6 +216,10 @@ export default function NewAdmission() {
                 <label className="block text-sm font-medium text-foreground mb-2">Nome Social</label>
                 <input
                   type="text"
+                  data-core="true"
+                  maxLength={150}
+                  value={socialName}
+                  onChange={(e) => setSocialName(e.target.value)}
                   className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="Nome social (se aplicável)"
                 />
@@ -121,6 +228,11 @@ export default function NewAdmission() {
                 <label className="block text-sm font-medium text-foreground mb-2">Data de Nascimento *</label>
                 <input
                   type="date"
+                  data-core="true"
+                  required
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
                   className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
@@ -128,6 +240,13 @@ export default function NewAdmission() {
                 <label className="block text-sm font-medium text-foreground mb-2">CPF *</label>
                 <input
                   type="text"
+                  data-core="true"
+                  required
+                  inputMode="numeric"
+                  pattern="\d{3}\.\d{3}\.\d{3}-\d{2}"
+                  title="CPF no formato 000.000.000-00"
+                  value={cpf}
+                  onChange={(e) => setCpf(formatCpfInput(e.target.value))}
                   className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="000.000.000-00"
                 />
@@ -449,6 +568,12 @@ export default function NewAdmission() {
                 <label className="block text-sm font-medium text-foreground mb-2">3.1 Demanda / Queixa Principal *</label>
                 <textarea
                   rows={4}
+                  data-core="true"
+                  required
+                  minLength={3}
+                  maxLength={5000}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
                   className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   placeholder="Descreva a demanda ou queixa principal apresentada pelo paciente..."
                 />
@@ -946,24 +1071,25 @@ export default function NewAdmission() {
             <h3 className="font-semibold text-foreground text-lg">Profissional Responsável</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Nome do Profissional *</label>
+                <label className="block text-sm font-medium text-foreground mb-2">Nome do Profissional</label>
                 <input
                   type="text"
-                  className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="Nome completo"
+                  data-core="true"
+                  readOnly
+                  value={user?.name ?? ""}
+                  className="w-full px-4 py-2.5 bg-muted border border-input rounded-lg text-muted-foreground"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Categoria Profissional *</label>
-                <select className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary">
-                  <option>Selecione...</option>
-                  <option>Assistente Social</option>
-                  <option>Enfermeiro(a)</option>
-                  <option>Médico(a)</option>
-                  <option>Psicólogo(a)</option>
-                  <option>Terapeuta Ocupacional</option>
-                  <option>Outro</option>
-                </select>
+                <label className="block text-sm font-medium text-foreground mb-2">Categoria Profissional</label>
+                <input
+                  type="text"
+                  data-core="true"
+                  readOnly
+                  value={user ? ROLE_LABELS[user.role] : ""}
+                  className="w-full px-4 py-2.5 bg-muted border border-input rounded-lg text-muted-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">Preenchido automaticamente pela conta que está registrando.</p>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-foreground mb-2">Assinatura / Carimbo</label>
@@ -974,6 +1100,10 @@ export default function NewAdmission() {
             </div>
           </div>
 
+          {saveError && (
+            <p className="rounded-lg bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{saveError}</p>
+          )}
+
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <Link
               to="/dashboard"
@@ -983,10 +1113,11 @@ export default function NewAdmission() {
             </Link>
             <button
               type="submit"
-              className="flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all"
+              disabled={saving}
+              className="flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all disabled:opacity-60"
             >
               <Save className="w-5 h-5" />
-              Salvar Acolhimento
+              {saving ? "Salvando..." : "Salvar Acolhimento"}
             </button>
           </div>
         </form>

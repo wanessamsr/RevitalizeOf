@@ -1,6 +1,29 @@
 import { ArrowLeft, Save, FileText, Activity, Stethoscope, Plus, Trash2, EyeOff, Eye, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
-import { Link, useParams } from "react-router";
-import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { useEffect, useState } from "react";
+import { ApiError, createEvolution, getPatient, initials, type PatientDetail, type Prescription, type VitalSigns } from "../api";
+import { useAuth } from "../contexts/AuthContext";
+import { EVOLUTION_TYPE_ROLES, hasRole, type EvolutionType } from "../roles";
+
+type UiEvolutionType = "medica" | "enfermagem" | "multiprofissional";
+
+const TYPE_MAP: Record<UiEvolutionType, EvolutionType> = {
+  medica: "MEDICA",
+  enfermagem: "ENFERMAGEM",
+  multiprofissional: "MULTIPROFISSIONAL",
+};
+
+function pad(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+function localDate(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function localTime(date: Date): string {
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 type Topic = {
   id: number;
@@ -11,7 +34,41 @@ type Topic = {
 
 export default function NewEvolution() {
   const { patientId } = useParams();
-  const [evolutionType, setEvolutionType] = useState("medica");
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  // Cada perfil só registra os tipos de evolução permitidos (o servidor também confere).
+  const allowedTypes = (Object.keys(TYPE_MAP) as UiEvolutionType[]).filter((type) =>
+    hasRole(user?.role, EVOLUTION_TYPE_ROLES[TYPE_MAP[type]]),
+  );
+  const [evolutionType, setEvolutionType] = useState<UiEvolutionType>(allowedTypes[0] ?? "multiprofissional");
+
+  const [patient, setPatient] = useState<PatientDetail | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [now] = useState(() => new Date());
+  const [date, setDate] = useState(localDate(now));
+  const [time, setTime] = useState(localTime(now));
+  const [attendanceType, setAttendanceType] = useState("Atendimento na Unidade");
+  const [notes, setNotes] = useState("");
+  const [vitalSigns, setVitalSigns] = useState<VitalSigns>({ bloodPressure: "", heartRate: "", temperature: "", spo2: "" });
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([{ medicine: "", dosage: "", frequency: "" }]);
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!patientId) return;
+    let active = true;
+    getPatient(patientId)
+      .then((data) => {
+        if (active) setPatient(data);
+      })
+      .catch((requestError) => {
+        if (active) setLoadError(requestError instanceof Error ? requestError.message : "Não foi possível carregar o paciente.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [patientId]);
 
   const [topics, setTopics] = useState<Topic[]>([
     { id: 1, title: "Queixa Principal", content: "", isPrivate: false },
@@ -20,11 +77,6 @@ export default function NewEvolution() {
   ]);
   const [nextId, setNextId] = useState(4);
 
-  const patient = {
-    name: "Maria Silva Santos",
-    cpf: "123.456.789-00",
-    diagnosis: "F32 - Episódio Depressivo"
-  };
 
   const addTopic = () => {
     setTopics([...topics, { id: nextId, title: "Novo Tópico", content: "", isPrivate: false }]);
@@ -57,6 +109,66 @@ export default function NewEvolution() {
     setTopics(updated);
   };
 
+  const updatePrescription = (index: number, field: keyof Prescription, value: string) => {
+    setPrescriptions(prescriptions.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+  };
+
+  const addPrescription = () => {
+    setPrescriptions([...prescriptions, { medicine: "", dosage: "", frequency: "" }]);
+  };
+
+  const removePrescription = (index: number) => {
+    setPrescriptions(prescriptions.length === 1 ? [{ medicine: "", dosage: "", frequency: "" }] : prescriptions.filter((_, i) => i !== index));
+  };
+
+  const handleSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!patientId) return;
+    setSaveError("");
+
+    const occurredAt = new Date(`${date}T${time}:00`);
+    if (Number.isNaN(occurredAt.getTime())) {
+      setSaveError("Informe data e horário válidos.");
+      return;
+    }
+
+    const type = TYPE_MAP[evolutionType];
+    setSaving(true);
+    try {
+      await createEvolution(patientId, {
+        type,
+        attendanceType,
+        occurredAt: occurredAt.toISOString(),
+        notes: type === "MULTIPROFISSIONAL" ? "" : notes,
+        vitalSigns: type === "ENFERMAGEM" ? vitalSigns : undefined,
+        topics: type === "MULTIPROFISSIONAL" ? topics.map(({ title, content, isPrivate }) => ({ title, content, isPrivate })) : undefined,
+        prescriptions: type === "MEDICA" ? prescriptions.filter((item) => item.medicine.trim().length > 0) : undefined,
+      });
+      navigate(`/patients/${patientId}`, { replace: true });
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.fields) {
+        setSaveError(Object.values(requestError.fields)[0] ?? requestError.message);
+      } else {
+        setSaveError(requestError instanceof Error ? requestError.message : "Não foi possível salvar a evolução.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loadError) {
+    return (
+      <div className="p-6 space-y-4">
+        <Link to="/patients" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="w-4 h-4" /> Voltar para pacientes
+        </Link>
+        <div className="bg-red-100 px-4 py-3 rounded-lg text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{loadError}</div>
+      </div>
+    );
+  }
+
+  const inputClass = "w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary";
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-4">
@@ -72,18 +184,18 @@ export default function NewEvolution() {
       <div className="bg-gradient-to-r from-primary/10 to-accent/10 rounded-xl p-6 border border-primary/20">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold text-lg">
-            {patient.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+            {patient ? initials(patient.fullName) : ""}
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-foreground">{patient.name}</h2>
-            <p className="text-sm text-muted-foreground">CPF: {patient.cpf}</p>
-            <p className="text-sm text-muted-foreground">{patient.diagnosis}</p>
+            <h2 className="text-xl font-semibold text-foreground">{patient ? patient.fullName : "Carregando..."}</h2>
+            <p className="text-sm text-muted-foreground">CPF: {patient?.cpf ?? ""}</p>
+            <p className="text-sm text-muted-foreground">Profissional: {user?.name ?? ""}</p>
           </div>
         </div>
       </div>
 
       <div className="bg-card rounded-xl border border-border p-6">
-        <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+        <form className="space-y-6" onSubmit={handleSave}>
           <div>
             <label className="block text-sm font-medium text-foreground mb-3">Tipo de Evolução *</label>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -93,12 +205,15 @@ export default function NewEvolution() {
                 { value: "multiprofissional", label: "Evolução Multiprofissional", icon: FileText },
               ].map((type) => {
                 const Icon = type.icon;
+                const allowed = allowedTypes.includes(type.value as UiEvolutionType);
                 return (
                   <button
                     key={type.value}
                     type="button"
-                    onClick={() => setEvolutionType(type.value)}
-                    className={`p-4 rounded-lg border-2 transition-all ${
+                    disabled={!allowed}
+                    title={allowed ? undefined : "Seu perfil não registra este tipo de evolução"}
+                    onClick={() => setEvolutionType(type.value as UiEvolutionType)}
+                    className={`p-4 rounded-lg border-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                       evolutionType === type.value
                         ? "border-primary bg-primary/5"
                         : "border-border hover:border-primary/50"
@@ -119,21 +234,26 @@ export default function NewEvolution() {
               <label className="block text-sm font-medium text-foreground mb-2">Data do Atendimento *</label>
               <input
                 type="date"
-                defaultValue={new Date().toISOString().split('T')[0]}
-                className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                required
+                value={date}
+                max={localDate(new Date())}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputClass}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Horário *</label>
               <input
                 type="time"
-                defaultValue={new Date().toTimeString().slice(0, 5)}
-                className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                required
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className={inputClass}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Tipo de Atendimento *</label>
-              <select className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary">
+              <select value={attendanceType} onChange={(e) => setAttendanceType(e.target.value)} className={inputClass}>
                 <option>Atendimento na Unidade</option>
                 <option>Visita Domiciliar</option>
                 <option>Matriciamento</option>
@@ -147,19 +267,19 @@ export default function NewEvolution() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">PA (mmHg)</label>
-                  <input type="text" placeholder="120/80" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                  <input type="text" maxLength={20} value={vitalSigns.bloodPressure ?? ""} onChange={(e) => setVitalSigns({ ...vitalSigns, bloodPressure: e.target.value })} placeholder="120/80" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">FC (bpm)</label>
-                  <input type="number" placeholder="72" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                  <input type="number" min={0} max={300} value={vitalSigns.heartRate ?? ""} onChange={(e) => setVitalSigns({ ...vitalSigns, heartRate: e.target.value })} placeholder="72" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">Temp. (°C)</label>
-                  <input type="number" step="0.1" placeholder="36.5" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                  <input type="number" step="0.1" min={30} max={45} value={vitalSigns.temperature ?? ""} onChange={(e) => setVitalSigns({ ...vitalSigns, temperature: e.target.value })} placeholder="36.5" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-2">SpO2 (%)</label>
-                  <input type="number" placeholder="98" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                  <input type="number" min={0} max={100} value={vitalSigns.spo2 ?? ""} onChange={(e) => setVitalSigns({ ...vitalSigns, spo2: e.target.value })} placeholder="98" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
                 </div>
               </div>
             </div>
@@ -172,6 +292,10 @@ export default function NewEvolution() {
               </label>
               <textarea
                 rows={12}
+                required
+                maxLength={20000}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
                 className="w-full px-4 py-3 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none font-mono text-sm"
                 placeholder="Digite aqui a evolução do atendimento..."
               />
@@ -203,6 +327,7 @@ export default function NewEvolution() {
 
                       <input
                         type="text"
+                        maxLength={150}
                         value={topic.title}
                         onChange={(e) => updateTopic(topic.id, "title", e.target.value)}
                         className="flex-1 font-semibold text-sm bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground"
@@ -258,6 +383,7 @@ export default function NewEvolution() {
                     <div className="p-3">
                       <textarea
                         rows={4}
+                        maxLength={10000}
                         value={topic.content}
                         onChange={(e) => updateTopic(topic.id, "content", e.target.value)}
                         placeholder="Descreva este tópico..."
@@ -283,29 +409,43 @@ export default function NewEvolution() {
             <div className="bg-muted/50 p-6 rounded-lg space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-foreground">Prescrição Médica</h3>
-                <button type="button" className="text-sm text-primary hover:underline">
+                <button type="button" onClick={addPrescription} className="text-sm text-primary hover:underline">
                   + Adicionar Medicamento
                 </button>
               </div>
               <div className="space-y-3">
-                <div className="p-4 bg-background rounded-lg border border-border">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-foreground mb-2">Medicamento</label>
-                      <input type="text" placeholder="Ex: Fluoxetina 20mg" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-foreground mb-2">Posologia</label>
-                      <input type="text" placeholder="Ex: 1 comprimido" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-foreground mb-2">Frequência</label>
-                      <input type="text" placeholder="Ex: 1x ao dia (manhã)" className="w-full px-4 py-2.5 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                {prescriptions.map((item, index) => (
+                  <div key={index} className="p-4 bg-background rounded-lg border border-border">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end">
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">Medicamento</label>
+                        <input type="text" maxLength={150} value={item.medicine} onChange={(e) => updatePrescription(index, "medicine", e.target.value)} placeholder="Ex: Fluoxetina 20mg" className={inputClass} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">Posologia</label>
+                        <input type="text" maxLength={150} value={item.dosage} onChange={(e) => updatePrescription(index, "dosage", e.target.value)} placeholder="Ex: 1 comprimido" className={inputClass} />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">Frequência</label>
+                        <input type="text" maxLength={150} value={item.frequency} onChange={(e) => updatePrescription(index, "frequency", e.target.value)} placeholder="Ex: 1x ao dia (manhã)" className={inputClass} />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removePrescription(index)}
+                        title="Remover medicamento"
+                        className="p-2.5 hover:bg-red-50 text-red-500 rounded-lg transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                </div>
+                ))}
               </div>
             </div>
+          )}
+
+          {saveError && (
+            <p className="rounded-lg bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{saveError}</p>
           )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
@@ -316,17 +456,12 @@ export default function NewEvolution() {
               Cancelar
             </Link>
             <button
-              type="button"
-              className="px-6 py-2.5 border border-border rounded-lg font-medium hover:bg-muted transition-all"
-            >
-              Salvar Rascunho
-            </button>
-            <button
               type="submit"
-              className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all"
+              disabled={saving || !patient || allowedTypes.length === 0}
+              className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all disabled:opacity-60"
             >
               <Save className="w-5 h-5" />
-              Salvar Evolução
+              {saving ? "Salvando..." : "Salvar Evolução"}
             </button>
           </div>
         </form>

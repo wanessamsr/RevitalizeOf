@@ -1,23 +1,34 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
-import { ArrowLeft, Clock, Users, AlertCircle, Save, FileText, Check } from "lucide-react";
+import { useLocation, useNavigate } from "react-router";
+import { ArrowLeft, Clock, Users, AlertCircle, ShieldCheck, FileText, Check } from "lucide-react";
+
+export type AppointmentState = {
+  id: number;
+  time: string;
+  activity: string;
+  participants: number;
+  description: string;
+  isUrgent: boolean;
+};
 
 export default function AppointmentSession() {
   const navigate = useNavigate();
-  const [appointment, setAppointment] = useState<any>(null);
+  const location = useLocation();
+  // Os dados do atendimento chegam pela navegação (memória da página), nunca pelo armazenamento do navegador.
+  const [appointment, setAppointment] = useState<AppointmentState | null>(null);
   const [startTime, setStartTime] = useState<Date>(new Date());
   const [notes, setNotes] = useState("");
   const [attendees, setAttendees] = useState<string[]>([]);
   const [newAttendee, setNewAttendee] = useState("");
 
   useEffect(() => {
-    const savedAppointment = localStorage.getItem('currentAppointment');
-    if (savedAppointment) {
-      setAppointment(JSON.parse(savedAppointment));
+    const state = location.state as { appointment?: AppointmentState } | null;
+    if (state?.appointment) {
+      setAppointment(state.appointment);
     } else {
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     }
-  }, [navigate]);
+  }, [location.state, navigate]);
 
   const getElapsedTime = () => {
     const now = new Date();
@@ -50,8 +61,9 @@ export default function AppointmentSession() {
 
   const handleFinishAppointment = () => {
     if (confirm("Deseja finalizar o atendimento?")) {
-      localStorage.removeItem('currentAppointment');
-      navigate('/dashboard');
+      setNotes("");
+      setAttendees([]);
+      navigate('/dashboard', { replace: true });
     }
   };
 
@@ -113,6 +125,7 @@ export default function AppointmentSession() {
             </h3>
             <textarea
               rows={15}
+              maxLength={20000}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Digite aqui as anotações do atendimento...&#10;&#10;- Principais temas abordados&#10;- Participação dos pacientes&#10;- Observações relevantes&#10;- Encaminhamentos necessários&#10;- Próximos passos"
@@ -122,16 +135,10 @@ export default function AppointmentSession() {
               <p className="text-sm text-muted-foreground">
                 {notes.length} caracteres
               </p>
-              <button
-                onClick={() => {
-                  localStorage.setItem('appointmentNotes', notes);
-                  alert('Rascunho salvo com sucesso!');
-                }}
-                className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-all text-sm"
-              >
-                <Save className="w-4 h-4" />
-                Salvar Rascunho
-              </button>
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <ShieldCheck className="w-4 h-4" />
+                Por segurança, as anotações não são gravadas no navegador.
+              </p>
             </div>
           </div>
         </div>

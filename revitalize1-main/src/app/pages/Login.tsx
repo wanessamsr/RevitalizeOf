@@ -1,16 +1,21 @@
-import { useNavigate } from "react-router";
-import { Lock, User, Moon, Sun, X, Mail } from "lucide-react";
+import { Navigate, useNavigate } from "react-router";
+import { Lock, User, Moon, Sun, X, ShieldCheck } from "lucide-react";
 import logoLight from "../../imports/Logos_Revitalize.png";
 import logoDark from "../../imports/Logos_Revitalize_(1).png";
 import { useState, useEffect } from "react";
-import { login as loginRequest } from "../api";
+import { useAuth } from "../contexts/AuthContext";
+import type { AuthUser } from "../api";
+
+function homeFor(user: AuthUser): string {
+  if (user.mustChangePassword) return "/change-password";
+  return user.role === "ADMIN" ? "/users" : "/dashboard";
+}
 
 export default function Login() {
   const navigate = useNavigate();
+  const { user, loading, notice, login, clearNotice } = useAuth();
   const [isDark, setIsDark] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotSent, setForgotSent] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -48,16 +53,24 @@ export default function Login() {
     setLoginError("");
     setIsLoggingIn(true);
 
+    clearNotice();
+
     try {
-      const { token } = await loginRequest(email.trim(), password);
-      localStorage.setItem("revitalize-token", token);
-      navigate("/dashboard", { replace: true });
+      const loggedUser = await login(email.trim(), password);
+      setPassword("");
+      navigate(homeFor(loggedUser), { replace: true });
     } catch (error) {
+      setPassword("");
       setLoginError(error instanceof Error ? error.message : "Não foi possível efetuar o login.");
     } finally {
       setIsLoggingIn(false);
     }
   };
+
+  // Quem já tem sessão válida não precisa ver a tela de login.
+  if (!loading && user) {
+    return <Navigate to={homeFor(user)} replace />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0A1433] via-[#1A2847] to-[#2A3B5F] flex items-center justify-center p-4 relative">
@@ -91,17 +104,19 @@ export default function Login() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium text-foreground">
-                  E-mail ou CPF
+                  E-mail
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                   <input
                     id="email"
-                    type="text"
+                    type="email"
+                    autoComplete="username"
+                    maxLength={191}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     required
-                    placeholder="Digite seu e-mail ou CPF"
+                    placeholder="Digite seu e-mail"
                     className="w-full pl-10 pr-4 py-3 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                 </div>
@@ -116,6 +131,8 @@ export default function Login() {
                   <input
                     id="password"
                     type="password"
+                    autoComplete="current-password"
+                    maxLength={200}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
@@ -126,19 +143,21 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 rounded border-input" />
-                <span className="text-muted-foreground">Lembrar-me</span>
-              </label>
+            <div className="flex items-center justify-end text-sm">
               <button
                 type="button"
-                onClick={() => { setShowForgotPassword(true); setForgotSent(false); setForgotEmail(""); }}
+                onClick={() => setShowForgotPassword(true)}
                 className="text-primary hover:underline"
               >
                 Esqueceu a senha?
               </button>
             </div>
+
+            {notice && !loginError && (
+              <p className="rounded-lg bg-amber-100 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                {notice}
+              </p>
+            )}
 
             {loginError && (
               <p className="rounded-lg bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
@@ -148,7 +167,7 @@ export default function Login() {
 
             <button
               type="submit"
-              disabled={isLoggingIn}
+              disabled={isLoggingIn || loading}
               className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all shadow-lg hover:shadow-xl disabled:opacity-60"
             >
               {isLoggingIn ? "Entrando..." : "Entrar no Sistema"}
@@ -176,58 +195,22 @@ export default function Login() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            {forgotSent ? (
-              <div className="text-center py-6 space-y-3">
-                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto">
-                  <Mail className="w-8 h-8 text-green-600" />
-                </div>
-                <p className="font-medium text-foreground">E-mail enviado!</p>
-                <p className="text-sm text-muted-foreground">
-                  Verifique sua caixa de entrada e siga as instruções para redefinir sua senha.
-                </p>
-                <button
-                  onClick={() => setShowForgotPassword(false)}
-                  className="mt-4 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all"
-                >
-                  Fechar
-                </button>
+            <div className="text-center py-4 space-y-3">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <ShieldCheck className="w-8 h-8 text-primary" />
               </div>
-            ) : (
-              <form onSubmit={(e) => { e.preventDefault(); setForgotSent(true); }} className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Digite seu e-mail cadastrado. Enviaremos um link para redefinição da senha.
-                </p>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">E-mail</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
-                      type="email"
-                      required
-                      value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
-                      placeholder="seu@email.com"
-                      className="w-full pl-10 pr-4 py-3 bg-input-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotPassword(false)}
-                    className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-muted transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all"
-                  >
-                    Enviar Link
-                  </button>
-                </div>
-              </form>
-            )}
+              <p className="font-medium text-foreground">A senha é redefinida pelo administrador</p>
+              <p className="text-sm text-muted-foreground">
+                Por segurança dos prontuários, o Revitalize não envia senhas por e-mail. Procure o administrador do
+                sistema ou a coordenação do CAPS: ele gera uma senha temporária, que você troca no primeiro acesso.
+              </p>
+              <button
+                onClick={() => setShowForgotPassword(false)}
+                className="mt-4 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all"
+              >
+                Entendi
+              </button>
+            </div>
           </div>
         </div>
       )}

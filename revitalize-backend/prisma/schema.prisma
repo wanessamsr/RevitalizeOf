@@ -7,83 +7,199 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Perfis de acesso. A matriz do que cada perfil pode fazer fica em src/roles.ts.
+enum Role {
+  ADMIN
+  MEDICO
+  ENFERMAGEM
+  PSICOLOGO
+  ASSISTENTE_SOCIAL
+  TERAPEUTA_OCUPACIONAL
+  RECEPCAO
+}
+
+enum PatientStatus {
+  ATIVO
+  EM_CRISE
+  INATIVO
+}
+
+enum EvolutionType {
+  MEDICA
+  ENFERMAGEM
+  MULTIPROFISSIONAL
+}
+
 model User {
+  id                 String    @id @default(uuid())
+  name               String    @db.VarChar(150)
+  email              String    @unique @db.VarChar(191)
+  password           String    @db.VarChar(100)
+  role               Role
+  active             Boolean   @default(true)
+  mustChangePassword Boolean   @default(true)
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  passwordChangedAt  DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  sessions         Session[]
+  auditLogs        AuditLog[]
+  evolutions       Evolution[]
+  medicalRecords   MedicalRecord[]
+  admissions       Admission[]
+  referrals        Referral[]
+  absences         Absence[]
+  appointments     Appointment[]
+  patientsCreated  Patient[]
+}
+
+// Sessão no servidor. O navegador guarda apenas um identificador aleatório em
+// cookie httpOnly; aqui fica somente o hash SHA-256 desse identificador.
+model Session {
+  id         String    @id @db.VarChar(64)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  ip         String?   @db.VarChar(64)
+  userAgent  String?   @db.VarChar(255)
+
+  @@index([userId])
+}
+
+// Trilha de auditoria. A aplicação só faz INSERT nesta tabela.
+model AuditLog {
   id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      String   @default("PROFESSIONAL") 
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  action    String   @db.VarChar(40)
+  entity    String   @db.VarChar(40)
+  entityId  String?  @db.VarChar(64)
+  details   String?  @db.VarChar(500)
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(255)
   createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Patient {
-  id             String   @id @default(uuid())
-  fullName       String
-  cpf            String   @unique
-  birthDate      DateTime
-  status         String   @default("ACTIVE")
-  
+  id          String        @id @default(uuid())
+  fullName    String        @db.VarChar(150)
+  socialName  String?       @db.VarChar(150)
+  cpf         String        @unique @db.VarChar(11)
+  birthDate   DateTime      @db.Date
+  status      PatientStatus @default(ATIVO)
+  createdById String?
+  createdBy   User?         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
   medicalRecords MedicalRecord[]
   evolutions     Evolution[]
   admissions     Admission[]
   referrals      Referral[]
   absences       Absence[]
   appointments   Appointment[]
-  
-  createdAt      DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fullName])
 }
 
 model MedicalRecord {
   id          String   @id @default(uuid())
   patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
   description String   @db.Text
   date        DateTime @default(now())
+
+  @@index([patientId])
 }
 
+// Evolução clínica: imutável. Correções entram como adendo (amendsId aponta
+// para a evolução original); não existem rotas de edição nem de exclusão.
 model Evolution {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
-  notes       String   @db.Text
-  date        DateTime @default(now())
+  id             String        @id @default(uuid())
+  patientId      String
+  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  authorId       String
+  author         User          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  type           EvolutionType
+  attendanceType String        @db.VarChar(60)
+  occurredAt     DateTime
+  notes          String        @db.Text
+  details        Json?
+  amendsId       String?
+  amends         Evolution?    @relation("EvolutionAddenda", fields: [amendsId], references: [id], onDelete: Restrict)
+  addenda        Evolution[]   @relation("EvolutionAddenda")
+  createdAt      DateTime      @default(now())
+
+  @@index([patientId, occurredAt])
+  @@index([amendsId])
 }
 
 model Admission {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
-  reason      String
-  date        DateTime @default(now())
+  id        String   @id @default(uuid())
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  type      String   @db.VarChar(40)
+  reason    String   @db.Text
+  details   Json?
+  date      DateTime @default(now())
+
+  @@index([patientId])
 }
 
 model Referral {
   id          String   @id @default(uuid())
   patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
   destination String
-  reason      String
+  reason      String   @db.Text
   date        DateTime @default(now())
+
+  @@index([patientId])
 }
 
 model Absence {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
-  reason      String?
-  date        DateTime
+  id           String   @id @default(uuid())
+  patientId    String
+  patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  recordedById String?
+  recordedBy   User?    @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  reason       String?
+  date         DateTime
+
+  @@index([patientId])
 }
 
 model Appointment {
   id          String   @id @default(uuid())
   patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: Restrict)
   date        DateTime
   status      String   @default("SCHEDULED")
+
+  @@index([patientId])
 }
 
 model Medicine {
-  id          String   @id @default(uuid())
+  id          String @id @default(uuid())
   name        String
   quantity    Int
   minQuantity Int
@@ -97,14 +213,14 @@ model Workshop {
 }
 
 model GroupSession {
-  id          String   @id @default(uuid())
-  theme       String
-  date        DateTime
+  id    String   @id @default(uuid())
+  theme String
+  date  DateTime
 }
 
 model DailyProduction {
-  id          String   @id @default(uuid())
-  metricName  String
-  value       Int
-  date        DateTime @default(now())
+  id         String   @id @default(uuid())
+  metricName String
+  value      Int
+  date       DateTime @default(now())
 }

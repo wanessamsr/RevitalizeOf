@@ -1,1 +1,9 @@
 node_modules
+
+# Build gerado por "npm run build" (não versionar)
+dist
+
+# Variáveis de ambiente locais
+.env
+.env.*
+!.env.example

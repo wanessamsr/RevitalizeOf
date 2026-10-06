@@ -31,6 +31,22 @@ export default defineConfig({
     },
   },
 
+  // Em desenvolvimento, /api é repassado para o backend local. Assim o site e a
+  // API ficam na mesma origem e o cookie de sessão (SameSite=Strict) funciona.
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:3000',
+        changeOrigin: false,
+      },
+    },
+  },
+
+  build: {
+    // Não publica mapas do código-fonte em produção.
+    sourcemap: false,
+  },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })

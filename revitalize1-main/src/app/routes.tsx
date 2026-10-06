@@ -1,6 +1,6 @@
 import { createBrowserRouter } from "react-router";
-import React from "react";
 import Login from "./pages/Login";
+import ChangePassword from "./pages/ChangePassword";
 import Dashboard from "./pages/Dashboard";
 import Patients from "./pages/Patients";
 import PatientProfile from "./pages/PatientProfile";
@@ -14,8 +14,10 @@ import Referrals from "./pages/Referrals";
 import AppointmentSession from "./pages/AppointmentSession";
 import Schedule from "./pages/Schedule";
 import MedicalRecords from "./pages/MedicalRecords";
+import Users from "./pages/Users";
 import Layout from "./components/Layout";
 import PrivateRoute from "./components/PrivateRoute";
+import { ADMIN_ROLES, CLINICAL_ROLES, PATIENT_ROLES, STAFF_ROLES } from "./roles";
 
 export const router = createBrowserRouter([
   {
@@ -25,21 +27,44 @@ export const router = createBrowserRouter([
   {
     element: <PrivateRoute />,
     children: [
-      { element: <Layout />, children: [
-        { path: "/dashboard", element: <Dashboard /> },
-        { path: "/schedule", element: <Schedule /> },
-        { path: "/medical-records", element: <MedicalRecords /> },
-        { path: "/patients", element: <Patients /> },
-        { path: "/patients/:id", element: <PatientProfile /> },
-        { path: "/admission", element: <NewAdmission /> },
-        { path: "/evolution/:patientId", element: <NewEvolution /> },
-        { path: "/workshops", element: <Workshops /> },
-        { path: "/group-session", element: <GroupSession /> },
-        { path: "/daily-production", element: <DailyProduction /> },
-        { path: "/absences", element: <Absences /> },
-        { path: "/referrals", element: <Referrals /> },
-        { path: "/appointment-session", element: <AppointmentSession /> },
-      ] },
+      { path: "/change-password", element: <ChangePassword /> },
+      {
+        element: <Layout />,
+        children: [
+          {
+            element: <PrivateRoute roles={STAFF_ROLES} />,
+            children: [
+              { path: "/dashboard", element: <Dashboard /> },
+              { path: "/schedule", element: <Schedule /> },
+              { path: "/workshops", element: <Workshops /> },
+              { path: "/group-session", element: <GroupSession /> },
+              { path: "/daily-production", element: <DailyProduction /> },
+              { path: "/absences", element: <Absences /> },
+              { path: "/referrals", element: <Referrals /> },
+              { path: "/appointment-session", element: <AppointmentSession /> },
+            ],
+          },
+          {
+            element: <PrivateRoute roles={PATIENT_ROLES} />,
+            children: [
+              { path: "/patients", element: <Patients /> },
+              { path: "/patients/:id", element: <PatientProfile /> },
+              { path: "/admission", element: <NewAdmission /> },
+            ],
+          },
+          {
+            element: <PrivateRoute roles={CLINICAL_ROLES} />,
+            children: [
+              { path: "/medical-records", element: <MedicalRecords /> },
+              { path: "/evolution/:patientId", element: <NewEvolution /> },
+            ],
+          },
+          {
+            element: <PrivateRoute roles={ADMIN_ROLES} />,
+            children: [{ path: "/users", element: <Users /> }],
+          },
+        ],
+      },
     ],
   },
 ]);
