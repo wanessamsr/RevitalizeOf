@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("PROFESSIONAL") 
+  createdAt DateTime @default(now())
+}
+
+model Patient {
+  id             String   @id @default(uuid())
+  fullName       String
+  cpf            String   @unique
+  birthDate      DateTime
+  status         String   @default("ACTIVE")
+  
+  medicalRecords MedicalRecord[]
+  evolutions     Evolution[]
+  admissions     Admission[]
+  referrals      Referral[]
+  absences       Absence[]
+  appointments   Appointment[]
+  
+  createdAt      DateTime @default(now())
+}
+
+model MedicalRecord {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  description String   @db.Text
+  date        DateTime @default(now())
+}
+
+model Evolution {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  notes       String   @db.Text
+  date        DateTime @default(now())
+}
+
+model Admission {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  reason      String
+  date        DateTime @default(now())
+}
+
+model Referral {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  destination String
+  reason      String
+  date        DateTime @default(now())
+}
+
+model Absence {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  reason      String?
+  date        DateTime
+}
+
+model Appointment {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  date        DateTime
+  status      String   @default("SCHEDULED")
+}
+
+model Medicine {
+  id          String   @id @default(uuid())
+  name        String
+  quantity    Int
+  minQuantity Int
+}
+
+model Workshop {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  date        DateTime
+}
+
+model GroupSession {
+  id          String   @id @default(uuid())
+  theme       String
+  date        DateTime
+}
+
+model DailyProduction {
+  id          String   @id @default(uuid())
+  metricName  String
+  value       Int
+  date        DateTime @default(now())
+}
